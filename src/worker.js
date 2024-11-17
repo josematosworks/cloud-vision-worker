@@ -1,12 +1,11 @@
 export default {
   async fetch(request, env) {
     try {
-      // Get the file URL from the request query parameters
-      const url = new URL(request.url);
-      const fileUrl = url.searchParams.get('url');
+      // Get the file URL from the request body instead of query parameters
+      const { url: fileUrl } = await request.json();
       
       if (!fileUrl) {
-        return new Response('Please provide a file URL as a query parameter', { status: 400 });
+        return new Response('Please provide a file URL in the request body', { status: 400 });
       }
 
       // Fetch the file
@@ -30,7 +29,7 @@ export default {
       const visionRequest = {
         requests: [{
           image: {
-            content: Buffer.from(fileBuffer).toString('base64')
+            content: btoa(String.fromCharCode(...new Uint8Array(fileBuffer)))
           },
           features: [{
             type: 'TEXT_DETECTION'
