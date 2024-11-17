@@ -32,4 +32,4 @@ jobs:
           secrets: |
             GOOGLE_CLOUD_API_KEY
         env:
-          OPENAI_API_KEY: ${{ secrets.GOOGLE_CLOUD_API_KEY }}
+          GOOGLE_CLOUD_API_KEY: ${{ secrets.GOOGLE_CLOUD_API_KEY }}
