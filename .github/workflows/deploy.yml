@@ -30,6 +30,6 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           secrets: |
-            GOOGLE_CLOUD_API_KEY
+            GOOGLE_SERVICE_ACCOUNT
         env:
-          GOOGLE_CLOUD_API_KEY: ${{ secrets.GOOGLE_CLOUD_API_KEY }}
+          GOOGLE_SERVICE_ACCOUNT: ${{ secrets.GOOGLE_SERVICE_ACCOUNT }}
