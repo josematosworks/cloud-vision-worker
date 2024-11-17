@@ -124,13 +124,8 @@ async function convertPDFToImages(pdfBuffer) {
 export default {
   async fetch(request, env) {
     try {
-      // Parse service account from environment variable
       const serviceAccount = JSON.parse(env.GOOGLE_SERVICE_ACCOUNT);
-
-      // Get access token
       const accessToken = await getAccessToken(serviceAccount);
-
-      // Get the file URL from the request body
       const { url: fileUrl } = await request.json();
 
       if (!fileUrl) {
@@ -139,13 +134,13 @@ export default {
         });
       }
 
-      // Fetch the file
-      const fileResponse = await fetch(fileUrl);
+      // Fetch just the content-type header to determine file type
+      const fileResponse = await fetch(fileUrl, { method: 'HEAD' });
       const contentType = fileResponse.headers.get("content-type");
-      const fileBuffer = await fileResponse.arrayBuffer();
 
       // Check if it's PDF or image
       if (contentType.includes("pdf")) {
+        const fileBuffer = await (await fetch(fileUrl)).arrayBuffer();
         const images = await convertPDFToImages(fileBuffer);
         const promises = images.map(async (imageBuffer) => {
           const visionRequest = {
@@ -199,12 +194,14 @@ export default {
         );
       }
 
-      // Prepare the request to Cloud Vision API
+      // For images, pass the URL directly to Vision API
       const visionRequest = {
         requests: [
           {
             image: {
-              content: btoa(String.fromCharCode(...new Uint8Array(fileBuffer))),
+              source: {
+                imageUri: fileUrl
+              }
             },
             features: [
               {
