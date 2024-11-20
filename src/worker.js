@@ -148,7 +148,7 @@ async function convertTextToSpeech(text, accessToken) {
 
   const data = await ttsResponse.json();
   // Convert base64 audio content to ArrayBuffer
-  const audioContent = Uint8Array.from(atob(data.audioContent.replace(/_/g, '/').replace(/-/g, '+')), c => c.charCodeAt(0));
+  const audioContent = Uint8Array.from(atob(data.audioContent.replace(/_/g, '/')?.replace(/-/g, '+')), c => c.charCodeAt(0));
   return audioContent.buffer;
 }
 
