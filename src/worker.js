@@ -148,15 +148,15 @@ async function convertTextToSpeech(text, accessToken) {
 
   const data = await ttsResponse.json();
   // Convert base64 audio content to ArrayBuffer
-  const audioContent = Uint8Array.from(atob(data.audioContent), c => c.charCodeAt(0));
+  const audioContent = Uint8Array.from(atob(data.audioContent.replace(/_/g, '/').replace(/-/g, '+')), c => c.charCodeAt(0));
   return audioContent.buffer;
 }
 
 export default {
   async fetch(request, env) {
     // Get the request path
-    const url = new URL(request.url);
-    const path = url.pathname;
+    const request_url = new URL(request.url);
+    const path = request_url.pathname;
 
     try {
       const serviceAccount = JSON.parse(env.GOOGLE_SERVICE_ACCOUNT);
