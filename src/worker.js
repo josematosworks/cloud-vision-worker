@@ -121,125 +121,186 @@ async function convertPDFToImages(pdfBuffer) {
   return images;
 }
 
+async function convertTextToSpeech(text, accessToken) {
+  const ttsRequest = {
+    input: { text },
+    voice: {
+      languageCode: 'en-US',
+      name: 'en-US-Neural2-F',  // Using a neural voice
+      ssmlGender: 'FEMALE'
+    },
+    audioConfig: {
+      audioEncoding: 'MP3'
+    }
+  };
+
+  const ttsResponse = await fetch(
+    'https://texttospeech.googleapis.com/v1/text:synthesize',
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${accessToken}`
+      },
+      body: JSON.stringify(ttsRequest)
+    }
+  );
+
+  const data = await ttsResponse.json();
+  // Convert base64 audio content to ArrayBuffer
+  const audioContent = Uint8Array.from(atob(data.audioContent), c => c.charCodeAt(0));
+  return audioContent.buffer;
+}
+
 export default {
   async fetch(request, env) {
+    // Get the request path
+    const url = new URL(request.url);
+    const path = url.pathname;
+
     try {
       const serviceAccount = JSON.parse(env.GOOGLE_SERVICE_ACCOUNT);
       const accessToken = await getAccessToken(serviceAccount);
-      const { url: fileUrl } = await request.json();
 
-      if (!fileUrl) {
-        return new Response("Please provide a file URL in the request body", {
-          status: 400,
+      // Handle TTS requests
+      if (path === '/tts') {
+        if (request.method !== 'POST') {
+          return new Response('Method not allowed', { status: 405 });
+        }
+
+        const { text } = await request.json();
+        if (!text) {
+          return new Response('Please provide text in the request body', { 
+            status: 400 
+          });
+        }
+
+        const audioBuffer = await convertTextToSpeech(text, accessToken);
+        return new Response(audioBuffer, {
+          headers: {
+            'Content-Type': 'audio/mpeg',
+            'Content-Disposition': 'attachment; filename="speech.mp3"'
+          }
         });
       }
 
-      // Fetch just the content-type header to determine file type
-      const fileResponse = await fetch(fileUrl, { method: 'HEAD' });
-      const contentType = fileResponse.headers.get("content-type");
+      // Original OCR endpoint logic
+      if (path === '/ocr') {
+        const { url: fileUrl } = await request.json();
 
-      // Check if it's PDF or image
-      if (contentType.includes("pdf")) {
-        const fileBuffer = await (await fetch(fileUrl)).arrayBuffer();
-        const images = await convertPDFToImages(fileBuffer);
-        const promises = images.map(async (imageBuffer) => {
-          const visionRequest = {
-            requests: [
-              {
-                image: {
-                  content: btoa(
-                    String.fromCharCode(...new Uint8Array(imageBuffer))
-                  ),
-                },
-                features: [
-                  {
-                    type: "TEXT_DETECTION",
+        if (!fileUrl) {
+          return new Response("Please provide a file URL in the request body", {
+            status: 400,
+          });
+        }
+
+        // Fetch just the content-type header to determine file type
+        const fileResponse = await fetch(fileUrl, { method: 'HEAD' });
+        const contentType = fileResponse.headers.get("content-type");
+
+        // Check if it's PDF or image
+        if (contentType.includes("pdf")) {
+          const fileBuffer = await (await fetch(fileUrl)).arrayBuffer();
+          const images = await convertPDFToImages(fileBuffer);
+          const promises = images.map(async (imageBuffer) => {
+            const visionRequest = {
+              requests: [
+                {
+                  image: {
+                    content: btoa(
+                      String.fromCharCode(...new Uint8Array(imageBuffer))
+                    ),
                   },
-                ],
-              },
-            ],
-          };
+                  features: [
+                    {
+                      type: "TEXT_DETECTION",
+                    },
+                  ],
+                },
+              ],
+            };
 
-          const visionResponse = await fetch(
-            "https://vision.googleapis.com/v1/images:annotate",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${accessToken}`,
-              },
-              body: JSON.stringify(visionRequest),
-            }
+            const visionResponse = await fetch(
+              "https://vision.googleapis.com/v1/images:annotate",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${accessToken}`,
+                },
+                body: JSON.stringify(visionRequest),
+              }
+            );
+
+            const result = await visionResponse.json();
+            // Extract only the text from the response
+            return result.responses[0]?.fullTextAnnotation?.text || '';
+          });
+
+          const results = await Promise.all(promises);
+          // Add number of images processed to the response
+          return new Response(JSON.stringify({ 
+            text: results.join('\n\n'),
+            pageCount: images.length 
+          }), {
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+
+        if (!contentType.includes("image")) {
+          return new Response(
+            "Unsupported file type. Please provide an image file.",
+            { status: 400 }
           );
+        }
 
-          const result = await visionResponse.json();
-          // Extract only the text from the response
-          return result.responses[0]?.fullTextAnnotation?.text || '';
-        });
+        // For images, pass the URL directly to Vision API
+        const visionRequest = {
+          requests: [
+            {
+              image: {
+                source: {
+                  imageUri: fileUrl
+                }
+              },
+              features: [
+                {
+                  type: "TEXT_DETECTION",
+                },
+              ],
+            },
+          ],
+        };
 
-        const results = await Promise.all(promises);
-        // Add number of images processed to the response
+        // Call Cloud Vision API
+        const visionResponse = await fetch(
+          "https://vision.googleapis.com/v1/images:annotate",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify(visionRequest),
+          }
+        );
+
+        const visionData = await visionResponse.json();
+        // Extract only the text from the response
+        const extractedText = visionData.responses[0]?.fullTextAnnotation?.text || '';
+
+        // Add pageCount of 1 for single images
         return new Response(JSON.stringify({ 
-          text: results.join('\n\n'),
-          pageCount: images.length 
+          text: extractedText,
+          pageCount: 1 
         }), {
           headers: { "Content-Type": "application/json" },
         });
       }
 
-      if (!contentType.includes("image")) {
-        return new Response(
-          "Unsupported file type. Please provide an image file.",
-          { status: 400 }
-        );
-      }
-
-      // For images, pass the URL directly to Vision API
-      const visionRequest = {
-        requests: [
-          {
-            image: {
-              source: {
-                imageUri: fileUrl
-              }
-            },
-            features: [
-              {
-                type: "TEXT_DETECTION",
-              },
-            ],
-          },
-        ],
-      };
-
-      // Call Cloud Vision API
-      const visionResponse = await fetch(
-        "https://vision.googleapis.com/v1/images:annotate",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify(visionRequest),
-        }
-      );
-
-      const visionData = await visionResponse.json();
-      // Extract only the text from the response
-      const extractedText = visionData.responses[0]?.fullTextAnnotation?.text || '';
-
-      // Add pageCount of 1 for single images
-      return new Response(JSON.stringify({ 
-        text: extractedText,
-        pageCount: 1 
-      }), {
-        headers: { "Content-Type": "application/json" },
-      });
+      return new Response('Not found', { status: 404 });
     } catch (error) {
-      return new Response(`Error processing file: ${error.message}`, {
-        status: 500,
-      });
+      return new Response(`Error: ${error.message}`, { status: 500 });
     }
-  },
+  }
 };
